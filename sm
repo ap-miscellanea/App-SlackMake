@@ -1,0 +1,243 @@
+#!/usr/bin/env perl
+
+=begin plans
+
+one class per task:
+	inherit from superclass
+	new():
+		no getopt module
+		parses args
+		must know how not to consume too much!
+	cmd() builds commandline
+
+superclass:
+	new() croaks
+	run():
+		system( $self->cmd() )
+		die on error
+
+main program is dispatcher:
+	pull mode from args
+	construct object
+	call run()
+
+modes:
+	cf -- configure with defaults
+	cn -- configure (no defaults)
+	ch -- configure --help
+	mk -- build
+	pk -- package
+
+in configure modes:
+	-. => --enable-
+	+. => --disable-
+	-: => --with-
+	+: => --without-
+
+=end plans
+
+=head1 NAME
+
+=head1 SYNOPSIS
+
+=head1 DESCRIPTION
+
+=head1 ARGUMENTS
+
+=over 4
+
+=item B<-h>, B<--help>
+
+=item B<--man>
+
+=item B<-c>, B<--configure>
+
+=item B<-m>, B<--make>
+
+=item B<-p>, B<--package>
+
+=item B<-i>, B<--install>
+
+=back
+
+=head1 OPTIONS
+
+=over 4
+
+=item B<-n>, B<--dry-run>
+
+=item B<-N>, B<--pkg-name>
+
+=item B<-E>, B<--ac-enable>
+
+=item B<-D>, B<--ac-disable>
+
+=item B<-W>, B<--ac-with>
+
+=item B<-O>, B<--ac-without>
+
+=item B<-V>, B<--ac-var>
+
+=item B<--pkg-info>
+
+=back
+
+=head1 SEE ALSO
+
+=head1 AUTHORS
+
+Aristotle Pagaltzis
+
+=head1 COPYRIGHT
+
+This script is free software; you can redistribute it and/or modify it under the same terms as Perl itself.
+
+=cut
+
+use strict;
+use warnings;
+
+use Pod::Usage;
+use Getopt::Long 2.24, qw( :config bundling no_ignore_case no_auto_abbrev );
+
+use Cwd;
+use File::Spec::Functions qw( catdir catfile tmpdir );
+use File::Basename;
+use File::Temp qw( mkdtemp );
+use File::Path;
+use POSIX qw( strftime );
+
+use constant PWD => getcwd();
+
+my %pkg_info = (
+	ver  => 1,
+	arch => do { chomp( $_ = qx/arch/ ); $_ },
+	(
+		basename( PWD ) =~ /\A(.*)-(.*)\z/
+		? ( distname => $1, distver => $2 )
+		: ( distname => basename( PWD ), distver => "0.nover" )
+	),
+);
+
+my %autoconf_var;
+
+GetOptions(
+	'h|help'         => sub { pod2usage( -verbose => 1 ) },
+	'man'            => sub { pod2usage( -verbose => 2 ) },
+	'c|configure:s'  => \my $opt_configure,
+	'm|make:s'       => \my $opt_make,
+	'p|package'      => \my $opt_package,
+	'i|install'      => \my $opt_install,
+	'n|dry-run'      => \my $opt_dryrun,
+	'N|pkg-name=s'   => \my $opt_pkgname,
+	'E|ac-enable=s'  => \my @ac_enable,
+	'D|ac-disable=s' => \my @ac_disable,
+	'W|ac-with=s'    => \my @ac_with,
+	'O|ac-without=s' => \my @ac_without,
+	'V|ac-var=s'     => \%autoconf_var,
+	'prefix=s'       => \$autoconf_var{ prefix },
+	'pkg-info=s'     => \%pkg_info,
+	'cvs'            => sub { $pkg_info{ distver } = strftime( '%Y%m%d', localtime ) },
+) or pod2usage( -verbose => 1 );
+
+$opt_pkgname = join( '-', @pkg_info{ qw( distname distver arch ver ) } ) . '.txz'
+	unless defined $opt_pkgname;
+
+if( not defined $autoconf_var{ prefix } ) {
+	$autoconf_var{ prefix }         //= '/usr';
+	$autoconf_var{ sysconfdir }     //= catdir( '/etc', $pkg_info{ distname } );
+	$autoconf_var{ sharedstatedir } //= '/var/com';
+	$autoconf_var{ localstatedir }  //= '/var';
+	$autoconf_var{ mandir }         //= '/usr/man';
+}
+
+delete @autoconf_var{ grep !length $autoconf_var{ $_ }, keys %autoconf_var };
+
+sub parse_features { map /\G ,? ( .+? (?: =.* \z | (?=,) | \z ) ) /xg, @_ }
+
+sub pull_argv {
+	my @pulled;
+	while ( @ARGV ) {
+		my $curr = shift @ARGV;
+		last if $curr eq '--';
+		push @pulled, $curr;
+	}
+	return @pulled;
+}
+
+sub run {
+	if ( $opt_dryrun ) {
+		print join( ' ', @_ ), "\n";
+		return 1;
+	}
+	return system( @_ ) == 0;
+}
+
+sub stage {
+	my %arg = ( 'stage', @_ );
+	return if exists $arg{ if } and not $arg{ if };
+	my $success = $arg{ do }->();
+	if( not $success ) {
+		print "Failure during $arg{ stage }\n" if exists $arg{ stage };
+		exit 1;
+	}
+}
+
+###############################################################################
+
+stage 'configure', if => defined $opt_configure, do => sub {
+	my $do_help;
+	( $do_help, $opt_configure ) = 1 if $opt_configure eq 'h';
+	run(
+		( -x $opt_configure ? $opt_configure : './configure' ),
+		map  ( "--$_=$autoconf_var{$_}", sort { length $a <=> length $b } keys %autoconf_var ),
+		map  ( "--enable-$_",  parse_features @ac_enable ),
+		map  ( "--disable-$_", parse_features @ac_disable ),
+		map  ( "--with-$_",    parse_features @ac_with ),
+		map  ( "--without-$_", parse_features @ac_without ),
+		grep ( $do_help, '--help' ),
+		pull_argv(),
+	)
+};
+
+stage 'make', if => defined $opt_make, do => sub {
+	run( ( -x $opt_make ? $opt_make : 'make' ), pull_argv() );
+};
+
+stage 'package creation', if => $opt_package, do => sub {
+	unless ( $opt_dryrun or $< == 0 ) {
+		print STDERR "Creating package as non-root. Continue (y/n)? ";
+		last unless <> =~ /^\s*y/i;
+	}
+
+	my $tmpdir = $opt_dryrun
+		? '$tmpdir'
+		: mkdtemp( catdir( tmpdir, 'slakmk.XXXXXXXX' ) );
+
+	chmod 0755, $tmpdir unless $opt_dryrun;
+
+	my @cmd;
+	( @cmd = pull_argv() ) or ( @cmd = qw( make install DESTDIR=%d/ ) );
+
+	s/ \G ( %(.) | . ) /
+		( !defined $2 ) ? $1      :
+		$2 eq '%'       ? '%'     :
+		$2 eq 'd'       ? $tmpdir :
+		do { warn "Unknown format sequence '$1', ignoring\n"; '' }
+	/xge for @cmd;
+	run( @cmd );
+
+	chdir $tmpdir unless $opt_dryrun;
+
+	my $success = run( makepkg => -c => 'n', -l => 'y', catfile( PWD, $opt_pkgname ) );
+
+	chdir PWD unless $opt_dryrun;
+
+	rmtree $tmpdir unless $opt_dryrun;
+
+	return $success;
+};
+
+stage 'installation', if => $opt_install, do => sub {
+	run( installpkg => catfile( PWD, $opt_pkgname ) );
+};
