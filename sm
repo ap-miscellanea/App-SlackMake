@@ -113,10 +113,10 @@ use File::Spec::Functions qw( catdir );
 sub opt_spec {
 	my $self = shift;
 	$self->SUPER::opt_spec,
-	[ 'enable|e=s@'      => 'features to translate to --enable-foo options' ],
-	[ 'disable|d=s@'     => 'features to translate to --disable-foo options' ],
-	[ 'with|w=s@'        => 'packages to translate to --with-foo options' ],
-	[ 'without|o=s@'     => 'packages to translate to --without-foo options' ],
+	[ 'enable|E=s@'      => 'features to translate to --enable-foo options' ],
+	[ 'disable|D=s@'     => 'features to translate to --disable-foo options' ],
+	[ 'with|W=s@'        => 'packages to translate to --with-foo options' ],
+	[ 'without|O=s@'     => 'packages to translate to --without-foo options' ],
 }
 sub configure_args {
 	my $self = shift;
