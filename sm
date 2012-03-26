@@ -183,7 +183,7 @@ sub execute {
 
 	chmod 0755, $tmpdir unless $is_dryrun;
 
-	my @doc;
+	my @doc = grep -e && -s _, qw( README ChangeLog NEWS TODO INSTALL COPYING AUTHORS );
 	if ( $opt->{ docs } ) {
 		my $file;
 		push @doc, $file while @$args and '--' ne ( $file = shift @$args );
