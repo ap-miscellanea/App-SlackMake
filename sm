@@ -161,7 +161,8 @@ sub command_names { qw( pkg p ) }
 sub abstract { 'create package' }
 sub opt_spec {
 	[ 'docs|d!'     => 'specify that command line starts with "--"-terminated list of files to copy to /usr/doc' ],
-	[ 'postcmd|p=s' => 'shell commands to run before package creation (will run inside the package tree)' ],
+	[ 'postcmd|p=s' => 'shell commands to run inside package tree before package creation (provides PKGDIR env var)' ],
+	[ 'precmd|r=s'  => 'shell commands to run run inside package tree before "make install" (provides PKGDIR env var)' ],
 }
 use File::Spec::Functions qw( catdir catfile tmpdir no_upwards );
 sub execute {
@@ -189,7 +190,14 @@ sub execute {
 		push @doc, $file while @$args and '--' ne ( $file = shift @$args );
 	}
 
-	my @cmd = @$args ? @$args : qw( make install DESTDIR=%d/ );
+	if ( my $sh = $opt->{'precmd'} ) {
+		local $ENV{'PKGDIR'} = $self->app->initial_wd;
+		chdir $tmpdir unless $is_dryrun;
+		$self->run_command( sh => -c => $sh );
+		chdir $self->app->initial_wd unless $is_dryrun;
+	}
+
+	my @cmd = @$args ? @$args : qw( make install DESTDIR=%d );
 
 	s/ \G ( %(.) | . ) /
 		( !defined $2 ) ? $1      :
@@ -213,7 +221,8 @@ sub execute {
 
 	chdir $tmpdir unless $is_dryrun;
 
-	if ( my $sh = $opt->{ postcmd } ) {
+	if ( my $sh = $opt->{'postcmd'} ) {
+		local $ENV{'PKGDIR'} = $self->app->initial_wd;
 		$self->run_command( sh => -c => $sh );
 	}
 
