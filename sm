@@ -139,6 +139,7 @@ sub local_opt_spec {
 	[ 'sysconfdir=s'     => 'override sysconfdir default',     { default => sub { catdir '/etc', shift->app->dist_name } } ],
 	[ 'sharedstatedir=s' => 'override sharedstatedir default', { default => '/var/com' } ],
 	[ 'localstatedir=s'  => 'override localstatedir default',  { default => '/var' } ],
+	[ 'libdir=s'         => 'override libdir default',         { default => sub { '/usr/lib' . ( `uname -m` =~ /^x86_64$/ ? '64' : '' ) } } ],
 	[ 'mandir=s'         => 'override mandir default',         { default => '/usr/man' } ],
 	[ 'docdir=s'         => 'override docdir default',         { default => sub { catdir '/usr/doc', shift->app->dist_release } } ],
 }
